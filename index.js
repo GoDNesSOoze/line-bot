@@ -24,10 +24,11 @@ app.post('/webhook', line.middleware(config), async (req, res) => {
     if (event.message.type !== 'text') continue;
 
     const text = event.message.text.trim();
+    const groupId = event.source.groupId || 'private';
 
+    // 👉 訂貨功能
     if (text.startsWith('訂貨 ')) {
       const item = text.replace(/^訂貨\s+/, '').trim();
-      const groupId = event.source.groupId || 'private';
       const messageTime = new Date(event.timestamp).toISOString();
       const dateOnly = messageTime.split('T')[0];
 
@@ -53,6 +54,51 @@ app.post('/webhook', line.middleware(config), async (req, res) => {
         type: 'text',
         text: `已記錄訂貨：${item}\n日期：${dateOnly}`,
       });
+
+      continue;
+    }
+
+    // 👉 查清單功能
+    if (text === '清單') {
+      const { data, error } = await supabase
+        .from('line-bot')
+        .select('item, message_time, status')
+        .eq('group_id', groupId)
+        .eq('status', 'pending')
+        .order('message_time', { ascending: true });
+
+      if (error) {
+        console.error('Supabase select error:', error);
+        await client.replyMessage(event.replyToken, {
+          type: 'text',
+          text: '讀取清單失敗',
+        });
+        continue;
+      }
+
+      if (!data || data.length === 0) {
+        await client.replyMessage(event.replyToken, {
+          type: 'text',
+          text: '目前沒有待訂項目',
+        });
+        continue;
+      }
+
+      const listText = data
+        .map((row, index) => {
+          const dateOnly = row.message_time
+            ? new Date(row.message_time).toISOString().split('T')[0]
+            : '無日期';
+          return `${index + 1}. ${row.item}（${dateOnly}）`;
+        })
+        .join('\n');
+
+      await client.replyMessage(event.replyToken, {
+        type: 'text',
+        text: `訂貨清單：\n${listText}`,
+      });
+
+      continue;
     }
   }
 
